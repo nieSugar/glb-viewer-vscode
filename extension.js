@@ -50,11 +50,13 @@ function getHTML(panel)
   html = html.replace(
     '<!-- content-security-policy-replaced-on-extension-js-->',
     `<meta http-equiv="Content-Security-Policy"
-    default-src 'none'; img-src ${panel.webview.cspSource} https: data: blob:;
-    script-src ${panel.webview.cspSource};
+    default-src 'none';
+    img-src ${panel.webview.cspSource} https: data: blob:;
+    script-src ${panel.webview.cspSource} 'wasm-unsafe-eval' blob:;
+    worker-src ${panel.webview.cspSource} blob:;
     style-src ${panel.webview.cspSource} 'unsafe-inline' data:;
     font-src ${panel.webview.cspSource} data:;
-    connect-src ${panel.webview.cspSource} https:;
+    connect-src ${panel.webview.cspSource} https: data: blob:;
     >`
   );
 
@@ -102,65 +104,94 @@ function checkFileExtensionDefaults(context)
   // Reset question for testing
   // context.globalState.update('gltfEditorPromptShown', false);
 
-  const alreadyPrompted = context.globalState.get(gltfPromptedKey);
-
-  const disposable = vscode.workspace.onDidOpenTextDocument((document) =>
+  const disposable = vscode.workspace.onDidOpenTextDocument(async(document) =>
   {
-    if (!alreadyPrompted && document.uri.fsPath.endsWith('.gltf'))
+    // Re-read each time so dismissing/answering takes effect immediately
+    if (context.globalState.get(gltfPromptedKey)) return;
+    if (!document.uri.fsPath.endsWith('.gltf')) return;
+
+    // Remember the editor that opened this .gltf, instead of relying on
+    // window.activeTextEditor later (which may have changed or been disposed).
+    const targetUri = document.uri;
+
+    let selection;
+    try
     {
-      vscode.window.showInformationMessage(
+      selection = await vscode.window.showInformationMessage(
         'Would you like to use the GLTF Visual Viewer for .gltf files?',
         'Yes', 'No'
-      ).then(selection =>
-      {
-        if (selection === 'Yes')
-        {
-          const config = vscode.workspace.getConfiguration('workbench');
-          const associations = config.get('editorAssociations') || {};
-          associations['*.gltf'] = 'glbViewer.customEditor';
-          config.update('editorAssociations', associations, vscode.ConfigurationTarget.Global).then(async() =>
-          {
-            // Reopen the file with your custom editor
-            const activeEditor = vscode.window.activeTextEditor;
-            if (activeEditor && activeEditor.document.uri.fsPath.endsWith('.gltf'))
-            {
-              const uri = activeEditor.document.uri;
-              await vscode.commands.executeCommand('workbench.action.closeActiveEditor');
-              await vscode.commands.executeCommand('vscode.openWith', uri, 'glbViewer.customEditor');
-            }
-          });
+      );
+    }
+    catch (_e)
+    {
+      return;
+    }
 
-          context.globalState.update(gltfPromptedKey, true);
-        }
-        else
-        {
-          context.globalState.update(gltfPromptedKey, true);
-        }
-      });
+    // User dismissed the toast (X) -> don't mark as answered, ask again later.
+    if (!selection) return;
+
+    await context.globalState.update(gltfPromptedKey, true);
+    if (selection !== 'Yes') return;
+
+    try
+    {
+      const config = vscode.workspace.getConfiguration('workbench');
+      const associations = { ...(config.get('editorAssociations') || {}) };
+      associations['*.gltf'] = 'glbViewer.customEditor';
+      await config.update('editorAssociations', associations, vscode.ConfigurationTarget.Global);
+
+      // Only reopen if the file is still open somewhere; openWith is safe even
+      // if the active editor has since changed or been disposed.
+      await vscode.commands.executeCommand('vscode.openWith', targetUri, 'glbViewer.customEditor');
+    }
+    catch (err)
+    {
+      console.warn('[glbViewer] failed to switch .gltf association:', err);
     }
   });
 
   context.subscriptions.push(disposable);
 }
 
-async function sendModelAsBase64(panel, modelUri)
+async function sendModelAsChunks(panel, modelUri)
 {
   try
   {
-    const data = await vscode.workspace.fs.readFile(modelUri); // works with git+ and file+
+    const data = await vscode.workspace.fs.readFile(modelUri); // Uint8Array, works for git+ etc.
 
-    const dataBase64 = Buffer.from(data).toString('base64');
     const fileSize = data.byteLength;
+    const extension = path.extname(modelUri.fsPath).substring(1) || 'glb';
 
-    console.log('Sending model data as base64, length:', dataBase64.length);
+    // VS Code's webview IPC serializes messages and is unhappy with extremely
+    // large payloads (~100MB+ tends to stall or fail). Stream the buffer in
+    // chunks of 4MB so each postMessage stays small. Sending Uint8Array via
+    // structured clone avoids the 33% base64 overhead too.
+    const CHUNK_SIZE = 4 * 1024 * 1024;
+    const totalChunks = Math.max(1, Math.ceil(fileSize / CHUNK_SIZE));
+    const transferId = `glb-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
-    // send back as base64 or ArrayBuffer
     panel.webview.postMessage({
-      type: 'loadModelFromBase64',
-      data: dataBase64,
-      extension: path.extname(modelUri.fsPath).substring(1),
-      fileSize: fileSize
+      type: 'modelChunkStart',
+      transferId,
+      extension,
+      fileSize,
+      totalChunks
     });
+
+    for (let i = 0; i < totalChunks; i++)
+    {
+      const start = i * CHUNK_SIZE;
+      const end = Math.min(start + CHUNK_SIZE, fileSize);
+      // Slice into a fresh Uint8Array so structured clone copies just this chunk.
+      const chunk = new Uint8Array(data.buffer, data.byteOffset + start, end - start).slice();
+
+      panel.webview.postMessage({
+        type: 'modelChunk',
+        transferId,
+        index: i,
+        data: chunk
+      });
+    }
   }
   catch (err)
   {
@@ -258,29 +289,34 @@ function activate(context)
 
           console.log('Sending modelUri to WebView:', modelUriString);
 
-          if (modelUriString.includes('git'))
+          // VS Code's webview-resource fetch path can stall or fail for very
+          // large files because the bytes are shuttled through IPC. Anything
+          // not on the regular file system (e.g. git:) or above the size
+          // threshold goes through chunked binary transfer instead.
+          const LARGE_FILE_THRESHOLD = 50 * 1024 * 1024; // 50 MB
+          const isVirtualFs = modelUriString.includes('git') || document.uri.scheme !== 'file';
+
+          const extension = path.extname(document.uri.fsPath).substring(1) || 'glb';
+
+          vscode.workspace.fs.stat(document.uri).then(stats =>
           {
-            sendModelAsBase64(webviewPanel, document.uri);
-          }
-          else
-          {
-            // Get file size for URI-based loading
-            vscode.workspace.fs.stat(document.uri).then(stats =>
+            if (isVirtualFs || stats.size > LARGE_FILE_THRESHOLD)
             {
-              webviewPanel.webview.postMessage({
-                type: 'loadModelFromUri',
-                dataUri: modelUriString,
-                fileSize: stats.size
-              });
-            }).catch(_err =>
-            {
-              // If stat fails, send without file size
-              webviewPanel.webview.postMessage({
-                type: 'loadModelFromUri',
-                dataUri: modelUriString
-              });
+              sendModelAsChunks(webviewPanel, document.uri);
+              return;
+            }
+
+            webviewPanel.webview.postMessage({
+              type: 'loadModelFromUri',
+              dataUri: modelUriString,
+              extension,
+              fileSize: stats.size
             });
-          }
+          }).catch(_err =>
+          {
+            // If stat fails, fall back to chunked transfer (safest path).
+            sendModelAsChunks(webviewPanel, document.uri);
+          });
         }
         if (message.type === 'openJson')
         {
