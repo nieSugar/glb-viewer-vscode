@@ -1,23 +1,21 @@
 {
-  "name": "ohzi-vscode-glb-viewer",
-  "version": "3.1.0",
-  "publisher": "OHZIInteractiveStudio",
+  "name": "niesugar-glb-viewer",
+  "version": "0.1.0",
+  "publisher": "nieSugar",
   "main": "extension.js",
   "icon": "icon.png",
-  "displayName": "GLTF/GLB Viewer",
+  "displayName": "GLTF/GLB Viewer (nieSugar)",
   "description": "View and explore your GLTF/GLB files",
-  "keywords": ["GLB", "glb", "glTF", "gltf", "3d", "model", "viewer", "ohzi", "ohzi-interactive", "ohzi-interactive-studio", "three.js", "threejs", "three", "three-js"],
+  "keywords": ["GLB", "glb", "glTF", "gltf", "3d", "model", "viewer", "three.js", "threejs", "three", "three-js"],
   "repository": {
     "type": "git",
-    "url": "https://github.com/ohzinteractive/glb-viewer-vscode"
+    "url": "https://github.com/nieSugar/glb-viewer-vscode"
   },
   "engines": {
     "vscode": "^1.80.0"
   },
   "authors": [
-    "Gianni Ballerini <ballerinidev@gmail.com>",
-    "Ramiro Fages <ramiro.fages@ohzi.io>",
-    "Federico Gratti <federico.gratti@ohzi.io>"
+    "nieSugar"
   ],
   "license": "MIT",
   "activationEvents": [

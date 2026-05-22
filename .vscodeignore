@@ -2,11 +2,17 @@
 .vscode/**
 .git/**
 .gitignore
+.gitmodules
 .eslintrc.js
 .stylelintrc.js
 jsconfig.json
 vite.config.mjs
 yarn.lock
+
+# Source / submodule (we only need the built output in public/webview)
+glb-viewer-core/**
+git_hooks/**
+tasks/**
 
 # Source files
 src/**
@@ -23,3 +29,4 @@ node_modules/**
 
 # Preview files
 previews/**
+preview.jpg

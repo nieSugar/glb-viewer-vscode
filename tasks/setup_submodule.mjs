@@ -20,7 +20,7 @@ class SetupSubmodule
       console.error('Error:', e);
     }
 
-    execSync(`git submodule add -f https://github.com/ohzinteractive/${process.argv[2]}`, { stdio: 'inherit' });
+    execSync(`git submodule add -f https://github.com/nieSugar/${process.argv[2]}`, { stdio: 'inherit' });
   }
 }
 
