@@ -8,17 +8,40 @@ class CreateTag
     try
     {
       const package_json = JSON.parse(fs.readFileSync('./package.json'));
-
       const app_version = package_json.version;
+      const tag = `v${app_version}`;
 
-      execSync(`git tag -a "v${app_version}" -m "Release Version ${app_version}" && git push origin "v${app_version}"`, { stdio: 'inherit' });
+      if (this.tag_exists(tag))
+      {
+        console.log(`Tag ${tag} already exists locally, pushing it.`);
+      }
+      else
+      {
+        execSync(`git tag -a "${tag}" -m "Release Version ${app_version}"`, { stdio: 'inherit' });
+      }
+
+      execSync(`git push origin "${tag}"`, { stdio: 'inherit' });
+      console.log(`Pushed ${tag}. GitHub Actions will build and publish the release.`);
     }
     catch (e)
     {
-      console.error('Error:', e);
+      console.error('Error:', e.message || e);
+      process.exit(1);
+    }
+  }
+
+  tag_exists(tag)
+  {
+    try
+    {
+      execSync(`git rev-parse -q --verify "refs/tags/${tag}"`, { stdio: 'ignore' });
+      return true;
+    }
+    catch
+    {
+      return false;
     }
   }
 }
 
-const create_tag = new CreateTag();
-create_tag.create();
+new CreateTag().create();

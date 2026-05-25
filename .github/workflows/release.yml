@@ -1,0 +1,72 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Enable Corepack (Yarn)
+        run: corepack enable
+
+      # Skip the repo's preinstall/postinstall hooks (they assume a fresh
+      # local checkout: git init, add submodules, configure git hooks).
+      # In CI the repo is already initialized and submodules are checked
+      # out by actions/checkout, so we install deps with scripts disabled.
+      - name: Install dependencies (root)
+        run: yarn install --ignore-scripts
+
+      - name: Install dependencies (glb-viewer-core)
+        run: yarn install --ignore-scripts
+        working-directory: glb-viewer-core
+
+      - name: Build webview
+        run: yarn build
+
+      - name: Install vsce
+        run: npm install -g @vscode/vsce
+
+      - name: Package extension
+        run: vsce package
+
+      - name: Extract release notes
+        id: notes
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          if [ -f CHANGELOG.md ]; then
+            awk -v ver="$VERSION" '
+              $0 ~ "^##[[:space:]]*\\[?"ver"\\]?" { flag=1; next }
+              flag && /^##[[:space:]]/ { exit }
+              flag { print }
+            ' CHANGELOG.md > release_notes.md
+          fi
+          if [ ! -s release_notes.md ]; then
+            echo "Release $VERSION" > release_notes.md
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Release ${{ steps.notes.outputs.version }}
+          body_path: release_notes.md
+          files: '*.vsix'
