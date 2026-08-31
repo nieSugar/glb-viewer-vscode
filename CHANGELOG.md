@@ -2,6 +2,11 @@
 
 All notable changes to the GLB Viewer extension will be documented in this file.
 
+## [0.1.1] - 2026-08-31
+
+### Fixed
+ - Fixed large texture previews incorrectly displaying as black.
+
 ## [3.1.0] - 2025-10-17
 
 ### Added
