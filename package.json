@@ -80,6 +80,7 @@
           },
           "default": [
             "name",
+            "visible",
             "type",
             "position",
             "rotation",
