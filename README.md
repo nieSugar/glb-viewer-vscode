@@ -33,6 +33,7 @@ From version 3.0.0 with the launch of the [web version](https://glb.ohzi.io) all
 - Get a quick general understanding of the number of geometries, vertices, materials, textures, animations, etc.
 - Camera auto focus focus on any object when clicked
 - Copy to properties to clipboard with a single click
+- Edit selected-object details with Apply/Cancel: name, local position/rotation (radians)/scale, visibility, shadow flags, up vector, frustum culling and JSON user data. Use Details Settings to show additional fields. Changes affect the current preview only and are not saved to the source GLB/GLTF file. Editing stops animations; instanced meshes are edited as a whole.
 - Extra tools to visualize information like normals, object origins, and more.
 - Quick search through the hierarchy tree
 
