@@ -1,0 +1,9 @@
+{
+  "extension.displayName": "GLTF/GLB Viewer (nieSugar)",
+  "extension.description": "View and explore your GLTF/GLB files",
+  "editor.displayName": "GLB Viewer",
+  "configuration.title": "GLB Viewer Settings",
+  "configuration.blenderPath": "Path to the Blender executable",
+  "configuration.prettifyPropertyLabels": "Prettyfies the labels of the object properties in the details panel",
+  "configuration.relevant3dObjectKeys": "Select which properties to show in the details panel"
+}

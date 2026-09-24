@@ -1,0 +1,9 @@
+{
+  "extension.displayName": "GLTF/GLB 查看器 (nieSugar)",
+  "extension.description": "查看并浏览 GLTF/GLB 文件",
+  "editor.displayName": "GLB 查看器",
+  "configuration.title": "GLB 查看器设置",
+  "configuration.blenderPath": "Blender 可执行文件的路径",
+  "configuration.prettifyPropertyLabels": "美化详情面板中的对象属性名称",
+  "configuration.relevant3dObjectKeys": "选择详情面板中显示的对象属性"
+}

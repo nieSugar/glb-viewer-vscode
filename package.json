@@ -4,8 +4,8 @@
   "publisher": "nieSugar",
   "main": "extension.js",
   "icon": "icon.png",
-  "displayName": "GLTF/GLB Viewer (nieSugar)",
-  "description": "View and explore your GLTF/GLB files",
+  "displayName": "%extension.displayName%",
+  "description": "%extension.description%",
   "keywords": ["GLB", "glb", "glTF", "gltf", "3d", "model", "viewer", "three.js", "threejs", "three", "three-js"],
   "repository": {
     "type": "git",
@@ -27,7 +27,7 @@
     "customEditors": [
       {
         "viewType": "glbViewer.customEditor",
-        "displayName": "GLB Viewer",
+        "displayName": "%editor.displayName%",
         "selector": [
           {
             "filenamePattern": "*.glb"
@@ -40,21 +40,21 @@
       }
     ],
     "configuration": {
-      "title": "GLB Viewer Settings",
+      "title": "%configuration.title%",
       "properties": {
         "glbViewer.blenderPath": {
           "type": "string",
           "default": "",
-          "description": "Path to the Blender executable"
+          "description": "%configuration.blenderPath%"
         },
         "glbViewer.prettifyPropertyLabels" : {
           "type": "boolean",
           "default": true,
-          "description": "Prettyfies the labels of the object properties in the details panel"
+          "description": "%configuration.prettifyPropertyLabels%"
         },
         "glbViewer.relevant3dObjectKeys": {
           "type": "array",
-          "description": "Select which properties to show in the details panel",
+          "description": "%configuration.relevant3dObjectKeys%",
           "items": {
             "type": "string",
             "enum": [

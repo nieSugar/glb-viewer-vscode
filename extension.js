@@ -3,6 +3,22 @@ const fs = require('fs');
 const path = require('path');
 const { exec } = require('child_process');
 
+const nativeMessages = vscode.env.language.toLowerCase().startsWith('zh')
+  ? {
+      useViewer: '是否使用 GLTF 可视化查看器打开 .gltf 文件？',
+      yes: '是',
+      no: '否',
+      readFailed: '读取 GLB 失败：',
+      blenderFailed: '启动 Blender 失败。请在设置中指定可执行文件路径。'
+    }
+  : {
+      useViewer: 'Would you like to use the GLTF Visual Viewer for .gltf files?',
+      yes: 'Yes',
+      no: 'No',
+      readFailed: 'Failed to read GLB: ',
+      blenderFailed: 'Error launching Blender. Make sure to set the executable path in settings.'
+    };
+
 // const _disposables = [];
 
 function getHTML(panel)
@@ -118,8 +134,8 @@ function checkFileExtensionDefaults(context)
     try
     {
       selection = await vscode.window.showInformationMessage(
-        'Would you like to use the GLTF Visual Viewer for .gltf files?',
-        'Yes', 'No'
+        nativeMessages.useViewer,
+        nativeMessages.yes, nativeMessages.no
       );
     }
     catch (_e)
@@ -131,7 +147,7 @@ function checkFileExtensionDefaults(context)
     if (!selection) return;
 
     await context.globalState.update(gltfPromptedKey, true);
-    if (selection !== 'Yes') return;
+    if (selection !== nativeMessages.yes) return;
 
     try
     {
@@ -195,7 +211,7 @@ async function sendModelAsChunks(panel, modelUri)
   }
   catch (err)
   {
-    vscode.window.showErrorMessage(`Failed to read GLB: ${err}`);
+    vscode.window.showErrorMessage(`${nativeMessages.readFailed}${err}`);
   }
 }
 
@@ -353,7 +369,7 @@ function activate(context)
           {
             if (error)
             {
-              vscode.window.showErrorMessage(`Error launching Blender. Make sure to set the executable path in settings. \n\n${error.message}`);
+              vscode.window.showErrorMessage(`${nativeMessages.blenderFailed}\n\n${error.message}`);
               return;
             }
             console.log(stdout || stderr);
