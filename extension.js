@@ -1,7 +1,7 @@
 const vscode = require('vscode');
 const fs = require('fs');
 const path = require('path');
-const { exec } = require('child_process');
+const { execFile } = require('child_process');
 
 const nativeMessages = vscode.env.language.toLowerCase().startsWith('zh')
   ? {
@@ -65,15 +65,14 @@ function getHTML(panel)
 
   html = html.replace(
     '<!-- content-security-policy-replaced-on-extension-js-->',
-    `<meta http-equiv="Content-Security-Policy"
-    default-src 'none';
+    `<meta http-equiv="Content-Security-Policy" content="default-src 'none';
     img-src ${panel.webview.cspSource} https: data: blob:;
     script-src ${panel.webview.cspSource} 'wasm-unsafe-eval' blob:;
     worker-src ${panel.webview.cspSource} blob:;
     style-src ${panel.webview.cspSource} 'unsafe-inline' data:;
     font-src ${panel.webview.cspSource} data:;
     connect-src ${panel.webview.cspSource} https: data: blob:;
-    >`
+    ">`
   );
 
   return html;
@@ -306,17 +305,15 @@ function activate(context)
           console.log('Sending modelUri to WebView:', modelUriString);
 
           // VS Code's webview-resource fetch path can stall or fail for very
-          // large files because the bytes are shuttled through IPC. Anything
-          // not on the regular file system (e.g. git:) or above the size
-          // threshold goes through chunked binary transfer instead.
+          // large binary files. Virtual files and large binaries use chunks;
+          // local glTF keeps its URI so external assets retain their base path.
           const LARGE_FILE_THRESHOLD = 50 * 1024 * 1024; // 50 MB
-          const isVirtualFs = modelUriString.includes('git') || document.uri.scheme !== 'file';
-
           const extension = path.extname(document.uri.fsPath).substring(1) || 'glb';
+          const isVirtualFs = document.uri.scheme !== 'file';
 
           vscode.workspace.fs.stat(document.uri).then(stats =>
           {
-            if (isVirtualFs || stats.size > LARGE_FILE_THRESHOLD)
+            if (isVirtualFs || (stats.size > LARGE_FILE_THRESHOLD && extension.toLowerCase() !== 'gltf'))
             {
               sendModelAsChunks(webviewPanel, document.uri);
               return;
@@ -330,6 +327,17 @@ function activate(context)
             });
           }).catch(_err =>
           {
+            if (document.uri.scheme === 'file' && extension.toLowerCase() === 'gltf')
+            {
+              webviewPanel.webview.postMessage({
+                type: 'loadModelFromUri',
+                dataUri: modelUriString,
+                extension,
+                fileSize: 0
+              });
+              return;
+            }
+
             // If stat fails, fall back to chunked transfer (safest path).
             sendModelAsChunks(webviewPanel, document.uri);
           });
@@ -361,11 +369,8 @@ function activate(context)
           // Path to Blender executable (customize this!)
           const blenderPath = getBlenderPath();
 
-          const command = `"${blenderPath}" --python-expr "import bpy; bpy.ops.import_scene.gltf(filepath='${filePath.replace(/\\/g, '\\\\')}')"`; // escape backslashes on Windows
-
-          console.log('RUNNING', command);
-
-          exec(command, (error, stdout, stderr) =>
+          const expression = 'import bpy, sys; bpy.ops.import_scene.gltf(filepath=sys.argv[-1])';
+          execFile(blenderPath, ['--python-expr', expression, '--', filePath], (error, stdout, stderr) =>
           {
             if (error)
             {
@@ -399,7 +404,7 @@ function activate(context)
 
       // webviewPanel.onDidDispose(() => disposePanel(webviewPanel), null, _disposables);
 
-      vscode.workspace.onDidChangeConfiguration((event) =>
+      const configurationListener = vscode.workspace.onDidChangeConfiguration((event) =>
       {
         if (event.affectsConfiguration('glbViewer.relevant3dObjectKeys'))
         {
@@ -416,6 +421,7 @@ function activate(context)
           });
         }
       });
+      webviewPanel.onDidDispose(() => configurationListener.dispose());
     }
   };
 

@@ -11,6 +11,7 @@ class CreatePackage
     catch (e)
     {
       console.error('Error:', e);
+      process.exitCode = 1;
     }
   }
 }

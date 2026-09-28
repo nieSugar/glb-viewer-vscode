@@ -1,4 +1,6 @@
 # Development files
+.cache/**
+.playwright-mcp/**
 .vscode/**
 .git/**
 .gitignore
@@ -18,6 +20,7 @@ tasks/**
 src/**
 
 # Test files
+tests/**
 **/*.test.js
 **/*.spec.js
 
