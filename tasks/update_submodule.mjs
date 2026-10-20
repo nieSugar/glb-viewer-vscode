@@ -1,4 +1,3 @@
-import { execSync } from 'child_process';
+import { execFileSync } from 'node:child_process';
 
-execSync(`git submodule update --init ${process.argv[2]} || echo 'Done'`, { stdio: 'inherit' });
-execSync(`cd ${process.argv[2]} && git pull origin main`, { stdio: 'inherit' });
+execFileSync('git', ['submodule', 'update', '--init', '--recursive', '--', process.argv[2] || 'glb-viewer-core'], { stdio: 'inherit' });

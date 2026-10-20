@@ -72,12 +72,18 @@ See [CHANGELOG.md](./CHANGELOG.md) for details about each release.
 
 2. Install dependencies:
    ```bash
-   yarn install
+   git submodule update --init --recursive
+   yarn install --frozen-lockfile
+   cd glb-viewer-core
+   yarn install --frozen-lockfile
+   cd ..
    ```
 
 3. Start development mode:
    Inside vscode with the folder open, press F5 to start the extension. This will open a new window with the extension running.
    Under the hood, it will run the `yarn start` command. That builds and watches for changes in the `src/` folder.
+
+Dependency installation does not modify Git or update the shared core. `yarn update-core` restores the commit recorded by this repository; upgrade the core explicitly in its repository and commit the new submodule pointer in each host.
 
 ### Build
 

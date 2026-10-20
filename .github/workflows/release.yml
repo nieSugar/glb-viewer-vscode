@@ -27,15 +27,12 @@ jobs:
       - name: Enable Corepack (Yarn)
         run: corepack enable
 
-      # Skip the repo's preinstall/postinstall hooks (they assume a fresh
-      # local checkout: git init, add submodules, configure git hooks).
-      # In CI the repo is already initialized and submodules are checked
-      # out by actions/checkout, so we install deps with scripts disabled.
+      # Checkout restores the pinned core commit; dependency installation cannot advance it.
       - name: Install dependencies (root)
-        run: yarn install --ignore-scripts
+        run: yarn install --frozen-lockfile --ignore-scripts
 
       - name: Install dependencies (glb-viewer-core)
-        run: yarn install --ignore-scripts
+        run: yarn install --frozen-lockfile --ignore-scripts
         working-directory: glb-viewer-core
 
       - name: Build webview

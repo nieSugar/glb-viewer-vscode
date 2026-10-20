@@ -107,11 +107,8 @@
     "vite-plugin-pug-transformer": "^1.0.5"
   },
   "scripts": {
-    "preinstall": "yarn setup-git && yarn setup-submodules && yarn update-submodules && yarn config-hooks",
-    "postinstall": "yarn setup-submodules && yarn update-submodules",
-    "setup-git": "git init",
     "setup-submodules": "yarn setup-core-submodule",
-    "setup-core-submodule": "node tasks/setup_submodule.mjs glb-viewer-core",
+    "setup-core-submodule": "node tasks/update_submodule.mjs glb-viewer-core",
     "update-submodules": "yarn update-core",
     "update-core": "node tasks/update_submodule.mjs glb-viewer-core",
     "config-hooks": "git config core.hooksPath git_hooks",
