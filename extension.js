@@ -8,14 +8,18 @@ const nativeMessages = vscode.env.language.toLowerCase().startsWith('zh')
       useViewer: '是否使用 GLTF 可视化查看器打开 .gltf 文件？',
       yes: '是',
       no: '否',
-      readFailed: '读取 GLB 失败：',
+      readFailed: '读取模型失败：',
+      loadFailed: '加载模型失败：',
+      externalResources: '此来源的 glTF 外部资源暂不支持。请将模型和依赖下载到本地后打开。',
       blenderFailed: '启动 Blender 失败。请在设置中指定可执行文件路径。'
     }
   : {
       useViewer: 'Would you like to use the GLTF Visual Viewer for .gltf files?',
       yes: 'Yes',
       no: 'No',
-      readFailed: 'Failed to read GLB: ',
+      readFailed: 'Failed to read model: ',
+      loadFailed: 'Failed to load model: ',
+      externalResources: 'External glTF resources from this filesystem are not supported. Download the model and its dependencies before opening it.',
       blenderFailed: 'Error launching Blender. Make sure to set the executable path in settings.'
     };
 
@@ -168,50 +172,41 @@ function checkFileExtensionDefaults(context)
   context.subscriptions.push(disposable);
 }
 
-async function sendModelAsChunks(panel, modelUri)
+async function sendModelAsChunks(panel, modelUri, requestId, isCurrent)
 {
-  try
+  const data = await vscode.workspace.fs.readFile(modelUri);
+  if (!isCurrent()) return;
+  const fileSize = data.byteLength;
+  const extension = (path.extname(modelUri.fsPath).substring(1) || 'glb').toLowerCase();
+  if (extension === 'gltf' && modelUri.scheme !== 'file')
   {
-    const data = await vscode.workspace.fs.readFile(modelUri); // Uint8Array, works for git+ etc.
-
-    const fileSize = data.byteLength;
-    const extension = path.extname(modelUri.fsPath).substring(1) || 'glb';
-
-    // VS Code's webview IPC serializes messages and is unhappy with extremely
-    // large payloads (~100MB+ tends to stall or fail). Stream the buffer in
-    // chunks of 4MB so each postMessage stays small. Sending Uint8Array via
-    // structured clone avoids the 33% base64 overhead too.
-    const CHUNK_SIZE = 4 * 1024 * 1024;
-    const totalChunks = Math.max(1, Math.ceil(fileSize / CHUNK_SIZE));
-    const transferId = `glb-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-
-    panel.webview.postMessage({
-      type: 'modelChunkStart',
-      transferId,
-      extension,
-      fileSize,
-      totalChunks
-    });
-
-    for (let i = 0; i < totalChunks; i++)
+    const json = JSON.parse(Buffer.from(data).toString('utf8'));
+    const resources = [...(json.buffers || []), ...(json.images || [])];
+    if (resources.some(resource => resource.uri && !/^(data:|https?:)/i.test(resource.uri)))
     {
-      const start = i * CHUNK_SIZE;
-      const end = Math.min(start + CHUNK_SIZE, fileSize);
-      // Slice into a fresh Uint8Array so structured clone copies just this chunk.
-      const chunk = new Uint8Array(data.buffer, data.byteOffset + start, end - start).slice();
-
-      panel.webview.postMessage({
-        type: 'modelChunk',
-        transferId,
-        index: i,
-        data: chunk
-      });
+      throw new Error(nativeMessages.externalResources);
     }
   }
-  catch (err)
+  // Chunking bounds each IPC message; the filesystem API still reads the full file.
+  const CHUNK_SIZE = 4 * 1024 * 1024;
+  const totalChunks = Math.max(1, Math.ceil(fileSize / CHUNK_SIZE));
+  const transferId = requestId;
+  if (!await panel.webview.postMessage({ type: 'modelChunkStart', requestId, transferId, extension, fileSize, totalChunks })) return;
+  for (let i = 0; i < totalChunks && isCurrent(); i++)
   {
-    vscode.window.showErrorMessage(`${nativeMessages.readFailed}${err}`);
+    const start = i * CHUNK_SIZE;
+    const chunk = data.slice(start, Math.min(start + CHUNK_SIZE, fileSize));
+    if (!await panel.webview.postMessage({ type: 'modelChunk', transferId, index: i, data: chunk })) return;
   }
+}
+
+function getViewerConfiguration()
+{
+  const configuration = vscode.workspace.getConfiguration('glbViewer');
+  return {
+    prettifyPropertyLabels: configuration.get('prettifyPropertyLabels', true),
+    relevant3dObjectKeys: configuration.get('relevant3dObjectKeys', ['name', 'visible', 'type', 'position', 'rotation', 'scale', 'globalScale', 'userData'])
+  };
 }
 
 function getDefaultBlenderPath()
@@ -282,67 +277,55 @@ function activate(context)
 
       webviewPanel.webview.html = getHTML(webviewPanel, modelUriString);
 
-      // Listen for messages from the WebView
-      webviewPanel.webview.onDidReceiveMessage(message =>
+      let disposed = false;
+      let generation = 0;
+      let activeRequestId;
+      const messageListener = webviewPanel.webview.onDidReceiveMessage(async message =>
       {
+        if (disposed || !message || typeof message !== 'object' || typeof message.type !== 'string') return;
         if (message.type === 'ready')
         {
-          // console.log('WebView is ready');
-          webviewPanel.webview.postMessage({
-            type: 'updateConfig',
-            config: vscode.workspace.getConfiguration('glbViewer')
-          });
-
-          webviewPanel.webview.postMessage({
-            type: 'setWebViewPath',
-            webview_path: getWebViewPath(webviewPanel)
-          });
-
-          webviewPanel.webview.postMessage({
-            type: 'showOpenOnBlenderButton'
-          });
-
-          console.log('Sending modelUri to WebView:', modelUriString);
-
-          // VS Code's webview-resource fetch path can stall or fail for very
-          // large binary files. Virtual files and large binaries use chunks;
-          // local glTF keeps its URI so external assets retain their base path.
-          const LARGE_FILE_THRESHOLD = 50 * 1024 * 1024; // 50 MB
-          const extension = path.extname(document.uri.fsPath).substring(1) || 'glb';
-          const isVirtualFs = document.uri.scheme !== 'file';
-
-          vscode.workspace.fs.stat(document.uri).then(stats =>
+          const requestId = `model-${++generation}`;
+          activeRequestId = requestId;
+          const isCurrent = () => !disposed && activeRequestId === requestId;
+          webviewPanel.webview.postMessage({ type: 'updateConfig', config: getViewerConfiguration() });
+          webviewPanel.webview.postMessage({ type: 'setWebViewPath', webview_path: getWebViewPath(webviewPanel) });
+          webviewPanel.webview.postMessage({ type: 'updateLanguage', language: vscode.env.language.toLowerCase().startsWith('zh') ? 'zh' : 'en' });
+          webviewPanel.webview.postMessage({ type: 'setHostCapabilities', capabilities: {
+            openJson: true, openAsText: true, openInBlender: document.uri.scheme === 'file'
+          } });
+          webviewPanel.webview.postMessage({ type: 'beginModelLoad', requestId });
+          const extension = (path.extname(document.uri.fsPath).substring(1) || 'glb').toLowerCase();
+          try
           {
-            if (isVirtualFs || (stats.size > LARGE_FILE_THRESHOLD && extension.toLowerCase() !== 'gltf'))
+            let stats;
+            try { stats = await vscode.workspace.fs.stat(document.uri); }
+            catch { stats = null; }
+            if (!isCurrent()) return;
+            if (document.uri.scheme === 'file' && (extension === 'gltf' || (stats && stats.size <= 50 * 1024 * 1024)))
             {
-              sendModelAsChunks(webviewPanel, document.uri);
-              return;
+              await webviewPanel.webview.postMessage({ type: 'loadModelFromUri', requestId,
+                dataUri: modelUriString, extension, fileSize: stats?.size || 0 });
             }
-
-            webviewPanel.webview.postMessage({
-              type: 'loadModelFromUri',
-              dataUri: modelUriString,
-              extension,
-              fileSize: stats.size
-            });
-          }).catch(_err =>
+            else await sendModelAsChunks(webviewPanel, document.uri, requestId, isCurrent);
+          }
+          catch (error)
           {
-            if (document.uri.scheme === 'file' && extension.toLowerCase() === 'gltf')
-            {
-              webviewPanel.webview.postMessage({
-                type: 'loadModelFromUri',
-                dataUri: modelUriString,
-                extension,
-                fileSize: 0
-              });
-              return;
-            }
-
-            // If stat fails, fall back to chunked transfer (safest path).
-            sendModelAsChunks(webviewPanel, document.uri);
-          });
+            if (!isCurrent()) return;
+            webviewPanel.webview.postMessage({ type: 'cancelModelLoad', requestId });
+            vscode.window.showErrorMessage(`${nativeMessages.readFailed}${error.message}`);
+          }
+          return;
         }
-        if (message.type === 'openJson')
+        if (message.type === 'modelLoadState')
+        {
+          if (message.requestId === activeRequestId && message.status === 'error' && typeof message.error === 'string')
+          {
+            vscode.window.showErrorMessage(`${nativeMessages.loadFailed}${message.error}`);
+          }
+          return;
+        }
+        if (message.type === 'openJson' && message.payload !== null && typeof message.payload === 'object')
         {
           const jsonContent = JSON.stringify(message.payload, null, 2);
 
@@ -360,7 +343,7 @@ function activate(context)
           vscode.commands.executeCommand('vscode.openWith', document.uri, 'default');
         }
 
-        if (message.type === 'openInBlender')
+        if (message.type === 'openInBlender' && document.uri.scheme === 'file')
         {
           console.log('opening in blender', document.uri.fsPath);
 
@@ -382,46 +365,30 @@ function activate(context)
         }
       });
 
-      // webviewPanel.onDidChangeViewState(e =>
-      // {
-      //   console.log('onDidChangeViewState', e.webviewPanel.title);
-
-      //   if (e.webviewPanel.visible)
-      //   {
-      //     console.log('WebView is now visible');
-
-      //     webviewPanel.webview.postMessage({
-      //       type: 'startRenderLoop'
-      //     });
-      //   }
-      //   else
-      //   {
-      //     webviewPanel.webview.postMessage({
-      //       type: 'stopRenderLoop'
-      //     });
-      //   }
-      // });
-
-      // webviewPanel.onDidDispose(() => disposePanel(webviewPanel), null, _disposables);
-
       const configurationListener = vscode.workspace.onDidChangeConfiguration((event) =>
       {
         if (event.affectsConfiguration('glbViewer.relevant3dObjectKeys'))
         {
           webviewPanel.webview.postMessage({
             type: 'updateConfig',
-            config: vscode.workspace.getConfiguration('glbViewer')
+            config: getViewerConfiguration()
           });
         }
         if (event.affectsConfiguration('glbViewer.prettifyPropertyLabels'))
         {
           webviewPanel.webview.postMessage({
             type: 'updateConfig',
-            config: vscode.workspace.getConfiguration('glbViewer')
+            config: getViewerConfiguration()
           });
         }
       });
-      webviewPanel.onDidDispose(() => configurationListener.dispose());
+      webviewPanel.onDidDispose(() =>
+      {
+        disposed = true;
+        activeRequestId = null;
+        configurationListener.dispose();
+        messageListener.dispose();
+      });
     }
   };
 

@@ -17,7 +17,9 @@ const vscode = {
       stat: async () => { if (statFails) throw new Error('stat failed'); return { size: statSize }; },
       readFile: async () => { readCount++; return Uint8Array.from([1, 2, 3]); }
     },
-    getConfiguration: () => ({ get: () => `C:\\Program Files\\Blender '${String.fromCharCode(0x6e2c, 0x8a66)}'\\blender.exe` }),
+    getConfiguration: () => ({ get: (key, fallback) => key === 'blenderPath'
+      ? `C:\\Program Files\\Blender '${String.fromCharCode(0x6e2c, 0x8a66)}'\\blender.exe`
+      : fallback }),
     onDidOpenTextDocument: () => ({ dispose() {} }),
     onDidChangeConfiguration: listener => { configListener = listener; return { dispose: () => { listener.disposed = true; } }; }
   },
@@ -61,6 +63,12 @@ async function main() {
   const gltfPanel = await ready(localGltf);
   assert(posts.some(item => item.type === 'loadModelFromUri'), 'large local glTF keeps its resource base');
   assert.equal(readCount, 0);
+  assert.deepEqual(posts.find(item => item.type === 'updateConfig').config, {
+    prettifyPropertyLabels: true, relevant3dObjectKeys: ['name', 'visible', 'type', 'position', 'rotation', 'scale', 'globalScale', 'userData']
+  });
+  const begin = posts.find(item => item.type === 'beginModelLoad');
+  assert.equal(typeof begin.requestId, 'string');
+  assert.equal(posts.find(item => item.type === 'loadModelFromUri').requestId, begin.requestId);
   assert(gltfPanel.webview.options.localResourceRoots.some(root => root.fsPath === require('node:path').dirname(localGltf.fsPath)));
 
   statFails = true;
@@ -77,7 +85,7 @@ async function main() {
   const localGlb = uriFile(`E:\\github(Old)\\models\\O'Brien ${String.fromCharCode(0x6a21, 0x578b)}.glb`);
   const target = await ready(localGlb);
   assert(posts.some(item => item.type === 'loadModelFromUri'), 'github local path is not a virtual filesystem');
-  messageHandler({ type: 'openInBlender' });
+  await messageHandler({ type: 'openInBlender' });
   assert.equal(execCall[0], `C:\\Program Files\\Blender '${String.fromCharCode(0x6e2c, 0x8a66)}'\\blender.exe`);
   assert.deepEqual(execCall[1].slice(0, 2), ['--python-expr', 'import bpy, sys; bpy.ops.import_scene.gltf(filepath=sys.argv[-1])']);
   assert.equal(execCall[1][2], '--');

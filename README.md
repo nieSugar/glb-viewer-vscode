@@ -24,6 +24,7 @@ From version 3.0.0 with the launch of the [web version](https://niesugar.github.
 - Inspect GLTF/GLB files directly in VS Code in a 3D viewer
 - Automatic file association with `.gltf .glb` files
 - Interactive 3D model viewing
+- Loading failures are reported by the viewer. Non-local documents cannot be opened directly in Blender; virtual glTF documents with relative external resources must first be downloaded with their dependencies.
 - DRACO compression support
 - KTX2 support (GPU Texture Compression)
 - Hierarchy, Animations, Textures, Materials, Geometries and Info panels
